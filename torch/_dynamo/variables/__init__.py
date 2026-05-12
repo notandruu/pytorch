@@ -74,6 +74,7 @@ from .functions import (
     FunctoolsPartialVariable,
     GetSetDescriptorVariable,
     InspectSignatureVariable,
+    InstanceMethodVariable,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
     MemberDescriptorVariable,
