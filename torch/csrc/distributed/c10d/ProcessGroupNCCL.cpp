@@ -34,6 +34,7 @@
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/torch.h>
 #include <optional>
 
@@ -1637,6 +1638,18 @@ void ProcessGroupNCCL::shutdown() {
 // NOLINTNEXTLINE(bugprone-exception-escape)
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
+
+#ifdef NCCL_HAS_SYMMEM_SUPPORT
+  // Drop our entry from NCCLDevCommManager so a future PG reusing the same
+  // group name can register a fresh comm. Skip if we never registered; the
+  // manager is a per-device singleton that throws if accessed with a
+  // different device than the one it was created for, so we must use the
+  // exact device we registered with rather than at::cuda::current_device().
+  if (symmMemRegisteredDevice_.has_value()) {
+    c10d::symmetric_memory::NCCLDevCommManager::get(*symmMemRegisteredDevice_)
+        .unregister_comm(getGroupUid());
+  }
+#endif
 
   // `shutdown()` or `abort` already called. Skip the favor of disposing
   // communicators.
@@ -3330,6 +3343,27 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
       std::lock_guard<std::mutex> lock(ncclCommMemPoolMapMutex);
       ncclCommMemPoolMap.emplace(ncclComm, MemPoolSet{});
     }
+
+#ifdef NCCL_HAS_SYMMEM_SUPPORT
+    // Publish the freshly-created host ncclComm into NCCLDevCommManager so
+    // NCCLSymmetricMemory can find it by group name without dynamic_cast'ing
+    // back to ProcessGroupNCCL. Other producers (e.g. torchcomms'
+    // TorchCommNCCLX) populate the same registry, so symm_mem sees a uniform
+    // group_name -> ncclComm_t lookup regardless of which backend owns the
+    // comm. Unregistered in ~ProcessGroupNCCL.
+    //
+    // Register only for the first device this PG creates a comm on:
+    // NCCLDevCommManager is a per-device singleton and throws on any
+    // subsequent call with a different device, so multi-device-per-rank PGs
+    // (legacy DDP) would crash here on the second device. The first comm
+    // matches the legacy getCommPtr() semantics that symm_mem expects, and
+    // multi-device-per-rank symm_mem is not supported by this path.
+    if (!symmMemRegisteredDevice_.has_value()) {
+      auto& mgr = c10d::symmetric_memory::NCCLDevCommManager::get(device);
+      mgr.register_comm(getGroupUid(), ncclComm->getNcclComm());
+      symmMemRegisteredDevice_ = device;
+    }
+#endif
   }
 
   it = devNCCLCommMap_.find(deviceKey);
