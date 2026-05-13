@@ -863,11 +863,32 @@ class TestMaxAutotune(TestCase):
         a = torch.randn(100, 10).to(GPU_TYPE)
         b = torch.randn(10, 100).to(GPU_TYPE)
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "ATEN",
-            }
+        mock_benchmark_choice = mock_benchmark_choice_wrapper(
+            aten_time=0.1, triton_time=1.0
+        )
+        extern_bias_shape = None
+
+        def tracking_benchmark_choice(cls, choice, autotune_args):
+            nonlocal extern_bias_shape
+            if AlgorithmSelectorCache._is_extern(choice):
+                benchmark_tensors = autotune_args.get_benchmark_tensors(extern=True)
+                inputs, _ = benchmark_tensors.unpack()
+                extern_bias_shape = tuple(inputs[0].shape)
+            return mock_benchmark_choice(choice, autotune_args)
+
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "ATEN,TRITON",
+                    "test_configs.max_mm_configs": 1,
+                }
+            ),
+            mock.patch.object(
+                AlgorithmSelectorCache,
+                "benchmark_choice",
+                classmethod(tracking_benchmark_choice),
+            ),
         ):
             Y_compiled, code = run_and_get_code(torch.compile(addmm), x, a, b)
             Y = addmm(x, a, b)
@@ -876,6 +897,11 @@ class TestMaxAutotune(TestCase):
             # Verify addmm is called without reinterpret_tensor on bias
             FileCheck().check("addmm").run(code[0])
             self.assertNotIn("addmm(reinterpret_tensor", code[0])
+
+            # Note: In async pipelined mode, benchmarks run in child processes
+            # where our mock doesn't apply, so extern_bias_shape may remain unset.
+            if extern_bias_shape is not None:
+                self.assertEqual((100,), extern_bias_shape)
 
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
