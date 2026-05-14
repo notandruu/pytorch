@@ -1058,6 +1058,19 @@ class TestUnbackedSymints(InductorTestCase):
         result = compiled_fn(t)
         self.assertEqual(result, 8)
 
+    def test_stride_order_uses_unbacked_optimization_hint(self, device):
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        seq = shape_env.create_unbacked_symint()
+        torch._dynamo.override_optimization_hint(seq, 16)
+
+        stride_order = ir.get_stride_order(
+            [256 * sympy.Max(1, seq.node.expr // 2), 256, 1],
+            shape_env,
+        )
+        self.assertEqual(stride_order, [2, 1, 0])
+
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     @inductor_config.patch(

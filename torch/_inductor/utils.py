@@ -73,6 +73,7 @@ from torch.fx.experimental._size_hinting import _sympy_subs
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     free_unbacked_symbols,
+    GuardOnDataDependentSymNode,
     IterateExprs,
     ShapeEnv,
 )
@@ -1452,14 +1453,28 @@ def argsort_sym(
         a_idx, a_val = a
         b_idx, b_val = b
 
-        def evaluate(expr: bool | torch.SymInt | sympy.Expr) -> bool:
+        def evaluate(
+            expr: bool | torch.SymInt | sympy.Expr,
+            fallback: Callable[[], bool],
+        ) -> bool:
             if isinstance(expr, bool):
                 return expr
-            return shape_env.evaluate_expr(expr, size_oblivious=True)
+            try:
+                return shape_env.evaluate_expr(expr, size_oblivious=True)
+            except GuardOnDataDependentSymNode:
+                return fallback()
 
-        if evaluate(a_val < b_val):
+        if evaluate(
+            a_val < b_val,
+            lambda: shape_env.optimization_hint(a_val)
+            < shape_env.optimization_hint(b_val),
+        ):
             return -1
-        if evaluate(a_val > b_val):
+        if evaluate(
+            a_val > b_val,
+            lambda: shape_env.optimization_hint(a_val)
+            > shape_env.optimization_hint(b_val),
+        ):
             return 1
         # If strides are the same, prefer the original order.
         # (this matches argsort's algorithm).
