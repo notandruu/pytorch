@@ -395,7 +395,7 @@ c10::SymBool TensorImpl::sym_is_non_overlapping_and_dense_custom() const {
 IntArrayRef TensorImpl::sizes_custom() const {
   // python faketensor path
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
-    return pyobj_slot_.load_pyobj_interpreter()->sizes(this);
+    return (*c10::impl::getGlobalPyInterpreter())->sizes(this);
   }
   if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
     // if tensor is not c++ faketensor and Fake has not been
@@ -405,7 +405,7 @@ IntArrayRef TensorImpl::sizes_custom() const {
     // also not excluded != included since its different bits or smth
     if (!is_fake() &&
         !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Fake)) {
-      if (auto* interp = pyobj_slot_.pyobj_interpreter()) {
+      if (auto* interp = c10::impl::getGlobalPyInterpreter()) {
         return (*interp)->sizes(this);
       }
     }
@@ -465,12 +465,12 @@ c10::Device TensorImpl::device_custom() const {
 
 IntArrayRef TensorImpl::strides_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
-    return pyobj_slot_.load_pyobj_interpreter()->strides(this);
+    return (*c10::impl::getGlobalPyInterpreter())->strides(this);
   }
   if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
     if (!is_fake() &&
         !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Fake)) {
-      if (auto* interp = pyobj_slot_.pyobj_interpreter()) {
+      if (auto* interp = c10::impl::getGlobalPyInterpreter()) {
         return (*interp)->strides(this);
       }
     }
@@ -502,7 +502,7 @@ int64_t TensorImpl::numel_custom() const {
   if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
     if (!is_fake() &&
         !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Fake)) {
-      if (auto* interp = pyobj_slot_.pyobj_interpreter()) {
+      if (auto* interp = c10::impl::getGlobalPyInterpreter()) {
         return (*interp)->numel(this);
       }
     }
@@ -531,7 +531,7 @@ int64_t TensorImpl::storage_offset_custom() const {
   if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
     if (!is_fake() &&
         !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Fake)) {
-      if (auto* interp = pyobj_slot_.pyobj_interpreter()) {
+      if (auto* interp = c10::impl::getGlobalPyInterpreter()) {
         return (*interp)->sym_storage_offset(this).guard_int(
             __FILE__, __LINE__);
       }
