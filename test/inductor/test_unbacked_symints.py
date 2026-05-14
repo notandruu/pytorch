@@ -1,12 +1,18 @@
 # Owner(s): ["module: inductor"]
 import functools
 import unittest
+from collections import OrderedDict
+from unittest import mock
+
+import sympy
 
 import torch
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.exc import InternalTorchDynamoError
-from torch._inductor import config as inductor_config
+from torch._inductor import config as inductor_config, ir
+from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.virtualized import V
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
@@ -17,9 +23,53 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import parametrize, skipIfXpu
 from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.utils._ordered_set import OrderedSet
 
 
 class TestUnbackedSymints(InductorTestCase):
+    def test_python_wrapper_binds_tensor_input_size_expr(self, device):
+        graph = mock.Mock()
+        graph.cpp_wrapper = False
+        graph.aot_mode = False
+        graph.constant_reprs = {}
+        graph.graph_inputs = OrderedDict()
+        graph.graph_input_names = []
+        graph.graph_outputs = []
+        graph.removed_buffers = set()
+        graph.inplaced_to_remove = set()
+        graph.get_training_phase.return_value = ""
+
+        with V.set_graph_handler(graph):
+            wrapper = PythonWrapperCodegen()
+            u0 = sympy.Symbol("u0", integer=True)
+            input_size_expr = u0 // 2
+            tensor = ir.TensorBox.create(
+                ir.Buffer(
+                    name="arg0_1",
+                    layout=ir.FixedLayout(
+                        torch.device(device),
+                        torch.float32,
+                        size=[input_size_expr, 4],
+                        stride=[4, 1],
+                    ),
+                )
+            )
+
+            bound_vars: OrderedSet[sympy.Symbol] = OrderedSet()
+            wrapper.codegen_input_symbol_assignment("arg0_1", tensor, bound_vars)
+
+            replacement = wrapper.input_expr_replacements[input_size_expr]
+            self.assertEqual(str(replacement), "arg0_1_size_0")
+            self.assertIn(replacement, bound_vars)
+            self.assertExpectedInline(
+                wrapper.codegen_python_sizevar(input_size_expr, simplify=False),
+                """arg0_1_size_0""",
+            )
+
+        prefix = wrapper.prefix.getvalue()
+        self.assertIn("arg0_1_size = arg0_1.size()", prefix)
+        self.assertIn("arg0_1_size_0 = arg0_1_size[0]", prefix)
+
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_expand(self, device):

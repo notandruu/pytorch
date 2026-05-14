@@ -3670,6 +3670,29 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
+    def test_backward_unbacked_batch(self, device):
+        x = torch.randn(
+            (4, 2, 128, 64),
+            device=device,
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+        torch._dynamo.decorators.mark_unbacked(x, 0, hint_override=x.shape[0])
+
+        @torch.compile(dynamic=True, fullgraph=True)
+        def fn(x):
+            mid = x.shape[0] // 2
+            chunk0 = x[:mid]
+            chunk1 = x[mid:]
+            return (
+                flex_attention(chunk0, chunk0, chunk0).sum()
+                + flex_attention(chunk1, chunk1, chunk1).sum()
+            )
+
+        fn(x).backward()
+
+    @supported_platform
+    @skip_on_cpu
     def test_differentiable_logsumexp_gradcheck(self, device):
         make_tensor = functools.partial(
             torch.randn,
