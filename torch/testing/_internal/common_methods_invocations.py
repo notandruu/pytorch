@@ -18996,6 +18996,9 @@ op_db: list[OpInfo] = [
                     dtypes=floating_types_and(torch.bfloat16, torch.half,),
                     dtypesIfCUDA=all_types_and(torch.bfloat16, torch.half),
                     dtypesIfMPS=all_types_and(torch.bfloat16, torch.half, torch.bool),
+                    # __rmod__ computes other % self, so self (lhs) is the divisor;
+                    # exclude zero to avoid undefined behavior for integer types.
+                    lhs_make_tensor_kwargs={'exclude_zero': True},
                     # https://github.com/pytorch/pytorch/issues/80411
                     gradcheck_fast_mode=True,
                     supports_out=False,
@@ -19005,11 +19008,6 @@ op_db: list[OpInfo] = [
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                         DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',),
-                        # NotImplementedError: "remainder_cpu" not implemented for *
-                        DecorateInfo(
-                            unittest.expectedFailure, 'TestConsistency', device_type='mps',
-                            dtypes=(torch.bool, torch.int16, torch.uint8, torch.int8, torch.int32, torch.int64)
-                        ),
                     ),
                     # Support autograd after torch.remainder(Tensor, Tensor) supports
                     # autograd of the second argument.
