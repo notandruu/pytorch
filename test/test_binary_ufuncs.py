@@ -2601,8 +2601,12 @@ class TestBinaryUfuncs(TestCase):
 
         result_pos = torch.copysign(mag, pos_nan)
         result_neg = torch.copysign(mag, neg_nan)
-        self.assertEqual(result_pos, torch.tensor([1.0, 1.0], dtype=dtype, device=device))
-        self.assertEqual(result_neg, torch.tensor([-1.0, -1.0], dtype=dtype, device=device))
+        self.assertEqual(
+            result_pos, torch.tensor([1.0, 1.0], dtype=dtype, device=device)
+        )
+        self.assertEqual(
+            result_neg, torch.tensor([-1.0, -1.0], dtype=dtype, device=device)
+        )
 
     @dtypes(
         *product(
