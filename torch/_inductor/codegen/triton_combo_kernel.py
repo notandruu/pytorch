@@ -468,6 +468,9 @@ class ComboKernel(Kernel):
         self.num_warps = 8
         self.block_size_reduce = 256
         self.dynamic_shape_args: list[str] = []
+        self.standalone_autotune_seed_infos: list[
+            tuple[str, list[Any], list[Any]]
+        ] = []
 
     def create_sub_kernel(self, triton_kernel: TritonKernel) -> TritonKernel:
         sub_kernel = triton_kernel
@@ -1155,6 +1158,59 @@ class ComboKernel(Kernel):
         if self.dynamic_shape_args:
             self.add_numel_to_call_args(name, call_args, arg_types)
 
+        triton_autotune_seed_infos = self.standalone_autotune_seed_infos
+        if self.standalone_autotune_seed_infos:
+            inplaced_call_arg_replacements: dict[str, str] = {}
+            seen_inplaced_args: set[str] = set()
+            for inplaced in self.args.inplace_buffers.values():
+                if isinstance(inplaced, RemovedArg):
+                    continue
+                if inplaced.inner_name in seen_inplaced_args:
+                    continue
+                seen_inplaced_args.add(inplaced.inner_name)
+                live_name = inplaced.other_names[-1]
+                for other_name in inplaced.other_names[:-1]:
+                    inplaced_call_arg_replacements[other_name] = live_name
+
+            seed_specs = []
+            triton_autotune_seed_infos = []
+            for (
+                seed_name,
+                seed_call_args,
+                seed_arg_types,
+            ) in self.standalone_autotune_seed_infos:
+                seed_call_args = [
+                    inplaced_call_arg_replacements.get(arg, arg)
+                    if isinstance(arg, str)
+                    else arg
+                    for arg in seed_call_args
+                ]
+                stale_args = [
+                    arg
+                    for arg in seed_call_args
+                    if isinstance(arg, str) and arg in V.graph.removed_buffers
+                ]
+                assert not stale_args, (
+                    f"Standalone autotune seed for {name} references removed "
+                    f"buffers: {stale_args}"
+                )
+                triton_autotune_seed_infos.append(
+                    (seed_name, seed_call_args, seed_arg_types)
+                )
+                seed_args = wrapper.prepare_triton_kernel_call(seed_call_args)
+                if len(seed_args) == 1:
+                    seed_args_str = f"({seed_args[0]},)"
+                else:
+                    seed_args_str = f"({', '.join(seed_args)})"
+                seed_specs.append(f"({seed_name}, {seed_args_str})")
+            if len(seed_specs) == 1:
+                seed_specs_str = f"({seed_specs[0]},)"
+            else:
+                seed_specs_str = f"({', '.join(seed_specs)})"
+            wrapper.writeline(
+                f"start_combo_kernel_standalone_autotune({name}, {seed_specs_str})"
+            )
+
         wrapper.generate_kernel_call(
             name,
             call_args,
@@ -1162,6 +1218,7 @@ class ComboKernel(Kernel):
             arg_types=arg_types,
             triton_meta=self.triton_meta,
             inductor_meta=self.inductor_meta,
+            triton_autotune_seed_infos=triton_autotune_seed_infos,
         )
 
     def combo_grid_meta(self, size_hints_list: list[dict[str, int]]) -> dict[str, Any]:
