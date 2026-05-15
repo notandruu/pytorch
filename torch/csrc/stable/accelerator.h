@@ -89,6 +89,13 @@ class Stream {
     return stream_id;
   }
 
+  void* nativeHandle() const {
+    void* native_handle = nullptr;
+    TORCH_ERROR_CODE_CHECK(
+        aoti_torch_stream_native_handle(stream_.get(), &native_handle));
+    return native_handle;
+  }
+
  private:
   std::shared_ptr<StreamOpaque> stream_;
 };
