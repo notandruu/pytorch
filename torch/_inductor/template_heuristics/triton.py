@@ -2404,6 +2404,10 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         """
         if dtype in (torch.float16, torch.bfloat16):
             return "tl.float32"
+        elif dtype == torch.float8_e4m3fnuz:
+            return "tl.float8e4b8"
+        elif dtype == torch.float8_e4m3fn:
+            return "tl.float8e4nv"
         return self._dtype_to_triton(dtype)
 
 
