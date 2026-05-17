@@ -27,6 +27,7 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
     skipCPUIf,
+    skipCUDAIf,
     skipXPUIf,
 )
 from torch.testing._internal.common_methods_invocations import op_db, skipOps
@@ -47,11 +48,11 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
+    HAS_CUDA_AND_TRITON,
     has_triton,
     HAS_XPU_AND_TRITON,
     maybe_skip_size_asserts,
 )
-from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
@@ -407,7 +408,6 @@ inductor_override_kwargs["cpu"] = {
         "atol": 1e-3,
         "rtol": 1e-4,
     },
-    ("_unsafe_masked_index_put_accumulate", f16): {"atol": 1e-4, "rtol": 0.01},
     # Following tests are failing with strict comparison but atol=1 is acceptable due roundings errors
     ("nn.functional.interpolate.bilinear", u8): {"atol": 1, "rtol": 0},
     ("nn.functional.upsample_bilinear", u8): {"atol": 1, "rtol": 0},
@@ -1009,6 +1009,12 @@ inductor_skip_exact_stride = {
     "tensordot",
 }
 
+# On CPU, Inductor may choose a different valid layout for these ops.
+inductor_skip_exact_stride_cpu = {
+    "nn.functional.max_unpool2d",
+    "nn.functional.max_unpool2d.grad",
+}
+
 # On XPU, Inductor may apply additional layout optimizations that can change
 # tensor strides compared to eager mode, so exact stride checks are relaxed
 # for certain ops.
@@ -1217,7 +1223,7 @@ class TestInductorOpInfo(TestCase):
     @skipCUDAMemoryLeakCheckIf(
         True
     )  # inductor kernels failing this test intermittently
-    @requires_gpu_and_triton
+    @skipCUDAIf(not HAS_CUDA_AND_TRITON, "Skipped! Triton not found")
     @skipXPUIf(
         not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler and Triton not found"
     )
@@ -1441,6 +1447,8 @@ class TestInductorOpInfo(TestCase):
 
                         # Call the appropriate check method based on device type
                         exact_stride = op_name not in inductor_skip_exact_stride
+                        if exact_stride and device_type == "cpu":
+                            exact_stride = op_name not in inductor_skip_exact_stride_cpu
                         # XPU has additional layout optimizations that change strides differently from eager mode.
                         if exact_stride and GPU_TYPE == "xpu":
                             exact_stride = op_name not in inductor_skip_exact_stride_xpu
