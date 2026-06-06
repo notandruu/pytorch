@@ -92,15 +92,8 @@ def _get_total_norm(
         if (foreach is None and _has_foreach_support(device_tensors, device)) or (
             foreach and _device_has_foreach_support(device)
         ):
-            # On CPU in auto mode, for many small tensors, concatenating into a
-            # single flat tensor and computing one norm avoids N aten::empty({})
-            # scalar allocations that _foreach_norm produces for each output
-            # (issue #133586). view(-1) returns a zero-copy view for contiguous
-            # tensors. Benchmark shows this is faster only when numel ≤ 512;
-            # above that the cat copy cost exceeds the allocation savings.
-            # Check all tensors: _group_tensors_by_device_and_dtype groups by
-            # (device, dtype), not by size, so a group may contain mixed-size
-            # tensors. Checking only [0] could trigger a huge cat.
+            # On CPU with small tensors, cat+norm avoids N scalar allocations from
+            # _foreach_norm (issue #133586). reshape(-1) handles non-contiguous grads.
             if (
                 foreach is None
                 and device.type == "cpu"
@@ -108,7 +101,7 @@ def _get_total_norm(
             ):
                 norms.append(
                     torch.linalg.vector_norm(
-                        torch.cat([t.view(-1) for t in device_tensors]), norm_type
+                        torch.cat([t.reshape(-1) for t in device_tensors]), norm_type
                     )
                 )
             else:
