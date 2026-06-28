@@ -3333,6 +3333,18 @@ class CommonTemplate:
         actual = grads(torch.compile(loss_fn))
         self.assertEqual(actual, expected)
 
+    def test_fmod_scalar_type_promotion_bf16(self):
+        # https://github.com/pytorch/pytorch/issues/186875
+        # Eager CPU rounds float scalars to the tensor dtype for fmod;
+        # inductor must match.
+        def fn(x):
+            return torch.fmod(x, 1.7)
+
+        x = torch.tensor(
+            [0.5, 1.703125, -0.5], dtype=torch.bfloat16, device=self.device
+        )
+        self.assertEqual(torch.compile(fn)(x), fn(x))
+
     @skip_if_gpu_halide
     @xfail_if_triton_cpu
     def test_dist(self):

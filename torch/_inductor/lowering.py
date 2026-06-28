@@ -7656,7 +7656,7 @@ def div_prim(a, b):
     def fn(*args):
         return ops.truediv(*args)
 
-    return make_pointwise(fn)(a, b)
+    return make_pointwise(fn, round_scalars_to_tensor_dtype=not is_integral)(a, b)
 
 
 @register_lowering(
